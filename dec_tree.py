@@ -19,6 +19,7 @@ class RulesEngine:
         self.condition_map = {}
         self.max_specificity = 0
         self.output_names = []
+        self.column_priority = []  # Added to store column priority
         self.load_rules(csv_files)
 
     def normalize_conditions(self, conditions):
@@ -108,7 +109,7 @@ class RulesEngine:
                 elif isinstance(c, frozenset):
                     for v in c:
                         unique_values[i][v] += 1
-        column_priority = sorted(range(self.num_columns), key=lambda i: len(unique_values[i]), reverse=True)
+        self.column_priority = sorted(range(self.num_columns), key=lambda i: len(unique_values[i]), reverse=True)  # Store column_priority
         
         self.root = self.build_tree(list(range(len(self.rules))), 0, set())
         print(f"Built decision tree in {time.time() - start_time:.2f}s")
@@ -127,7 +128,7 @@ class RulesEngine:
                 node.rules.append((outputs, specificity, idx, conditions))
             return node
         
-        node = DecisionTreeNode(column_idx=column_priority[depth] if depth < len(column_priority) else None)
+        node = DecisionTreeNode(column_idx=self.column_priority[depth] if depth < len(self.column_priority) else None)
         if node.column_idx is None:
             for idx in rules_indices:
                 rule = self.rules[idx]
@@ -157,7 +158,7 @@ class RulesEngine:
                 else:
                     node.conditions.append((value, False, child))
         if default_indices:
-            node.default_child = self.build_tree(default_indices, depth + 1, used_columns | {node.column_map[col]})
+            node.default_child = self.build_tree(default_indices, depth + 1, used_columns | {node.column_idx})
         
         return node
 
@@ -280,18 +281,11 @@ class RulesEngine:
 # Example usage
 if __name__ == "__main__":
     # Simulate CSV file with 11 rules, 2 columns, VG: and *
-    csv_content = """A,B,Output1
-1,VG:EUR:PUBLIC,o1
-VG:USA:UK,2,o2
-VG:FR:DE,*,o3
-VG:IT:ES,3,o4
-VG:CH:JP,*,o5
-1,4,o6
-VG:AU:NZ,5,o7
-2,VG:BR:AR,o8
-VG:CA:MX,*,o9
-3,VG:IN:SG,o10
-VG:RU:KR,2,o11"""
+    csv_content = """A,B,C,Output1
+A1,B1,C1,o1
+VG:A1:A2:A3,B3,C3,o2
+*,B3,C3,o3
+*,*,C3,o4"""
     with open("rules.csv", "w") as f:
         f.write(csv_content)
 
@@ -300,8 +294,7 @@ VG:RU:KR,2,o11"""
 
     # Test inputs
     test_inputs = [
-        ["1", "EUR"], ["USA", "2"], ["FR", "*"], ["IT", "3"], ["CH", "*"],
-        ["1", "4"], ["AU", "5"], ["2", "BR"], ["CA", "*"], ["3", "IN"], ["RU", "2"]
+        ["A1", "B3", "C3"]
     ]
     for test_input in test_inputs:
         best_outputs, partial_matches = engine.evaluate(test_input, return_partial_matches=True)
