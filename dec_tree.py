@@ -6,7 +6,7 @@ from collections import defaultdict
 class DecisionTreeNode:
     def __init__(self, column_idx=None):
         self.column_idx = column_idx
-        self.conditions = []  # (value_or_set, is_negated, child_node)
+        self.conditions = []  # (value_or_frozenset, is_negated, child_node)
         self.default_child = None
         self.rules = []  # (outputs_tuple, specificity, rule_idx, conditions)
 
@@ -25,7 +25,7 @@ class RulesEngine:
         normalized = []
         for c in conditions:
             if isinstance(c, str) and c.startswith('VG:') and c != '*':
-                normalized.append(set(c[3:].split(':')))
+                normalized.append(frozenset(c[3:].split(':')))  # Use frozenset instead of set
             else:
                 normalized.append(c)
         return tuple(normalized)
@@ -68,7 +68,7 @@ class RulesEngine:
                     typed_conditions = []
                     for c in full_conditions:
                         if isinstance(c, str) and c.startswith('VG:') and c != '*':
-                            typed_conditions.append(set(c[3:].split(':')))
+                            typed_conditions.append(frozenset(c[3:].split(':')))  # Use frozenset
                         else:
                             typed_conditions.append(c)
                     outputs_tuple = [None] * len(self.output_names)
@@ -95,7 +95,7 @@ class RulesEngine:
         
         self.rules = np.array(rules_list, dtype=object)
         for rule in self.rules:
-            specificity = sum(1 for c in rule[:-1] if c != '*' and not isinstance(c, set))
+            specificity = sum(1 for c in rule[:-1] if c != '*' and not isinstance(c, frozenset))
             self.max_specificity = max(self.max_specificity, specificity)
         print(f"Loaded {len(self.rules)} rules with {self.num_columns} columns, max specificity={self.max_specificity} in {time.time() - start_time:.2f}s")
         
@@ -103,9 +103,9 @@ class RulesEngine:
         unique_values = [defaultdict(int) for _ in range(self.num_columns)]
         for rule in self.rules:
             for i, c in enumerate(rule[:-1]):
-                if c != '*' and not isinstance(c, set):
+                if c != '*' and not isinstance(c, frozenset):
                     unique_values[i][c] += 1
-                elif isinstance(c, set):
+                elif isinstance(c, frozenset):
                     for v in c:
                         unique_values[i][v] += 1
         column_priority = sorted(range(self.num_columns), key=lambda i: len(unique_values[i]), reverse=True)
@@ -123,7 +123,7 @@ class RulesEngine:
                 rule = self.rules[idx]
                 conditions = rule[:-1]
                 outputs = rule[-1]
-                specificity = sum(1 for c in conditions if c != '*' and not isinstance(c, set))
+                specificity = sum(1 for c in conditions if c != '*' and not isinstance(c, frozenset))
                 node.rules.append((outputs, specificity, idx, conditions))
             return node
         
@@ -133,7 +133,7 @@ class RulesEngine:
                 rule = self.rules[idx]
                 conditions = rule[:-1]
                 outputs = rule[-1]
-                specificity = sum(1 for c in conditions if c != '*' and not isinstance(c, set))
+                specificity = sum(1 for c in conditions if c != '*' and not isinstance(c, frozenset))
                 node.rules.append((outputs, specificity, idx, conditions))
             return node
         
@@ -143,7 +143,7 @@ class RulesEngine:
             c = self.rules[idx][node.column_idx]
             if c == '*':
                 default_indices.append(idx)
-            elif isinstance(c, set):
+            elif isinstance(c, frozenset):
                 for v in c:
                     value_to_indices[v].append(idx)
             else:
@@ -152,12 +152,12 @@ class RulesEngine:
         for value, indices in sorted(value_to_indices.items(), key=lambda x: str(x[0])):
             if indices:  # Only create nodes for non-empty indices
                 child = self.build_tree(indices, depth + 1, used_columns | {node.column_idx})
-                if isinstance(value, set):
+                if isinstance(value, frozenset):
                     node.conditions.append((value, False, child))
                 else:
                     node.conditions.append((value, False, child))
         if default_indices:
-            node.default_child = self.build_tree(default_indices, depth + 1, used_columns | {node.column_idx})
+            node.default_child = self.build_tree(default_indices, depth + 1, used_columns | {node.column_map[col]})
         
         return node
 
@@ -166,7 +166,7 @@ class RulesEngine:
         if node.column_idx is not None:
             print(f"{indent}{prefix}Column: {node.column_idx}, Rules: {len(node.rules)}")
             for value, is_negated, child in node.conditions:
-                display_value = f"{{{','.join(sorted(value))}}}" if isinstance(value, set) else str(value)
+                display_value = f"{{{','.join(sorted(value))}}}" if isinstance(value, frozenset) else str(value)
                 print(f"{indent}  {prefix}Value: {display_value}, Negated: {is_negated}")
                 self.pretty_print_tree(child, depth + 1, f"{prefix}{display_value} -> ")
             if node.default_child:
@@ -200,7 +200,7 @@ class RulesEngine:
             for i, (c, v) in enumerate(zip(conditions, input_vector)):
                 if c == '*':
                     continue
-                elif isinstance(c, set):
+                elif isinstance(c, frozenset):
                     if v not in c:
                         return False
                 elif c != v:
@@ -231,7 +231,7 @@ class RulesEngine:
             stats["paths_explored"] += 1
             
             for condition_value, is_negated, child in node.conditions:
-                if isinstance(condition_value, set):
+                if isinstance(condition_value, frozenset):
                     if value in condition_value:
                         print(f"Debug: Following path for value {value} in {condition_value}")
                         traverse(child, depth + 1, current_path + [f"Col{col_idx}={value}"])
@@ -256,7 +256,7 @@ class RulesEngine:
         outputs, specificity, idx, conditions = best_match
         print(f"Selection Explanation:")
         print(f"  Best Match: Rule {idx}, Outputs={outputs}, Specificity={specificity}")
-        print(f"  Conditions: {[list(c) if isinstance(c, set) else c for c in conditions]}")
+        print(f"  Conditions: {[list(c) if isinstance(c, frozenset) else c for c in conditions]}")
         print(f"  Path Taken: {best_path}")
         print(f"  Why Selected: This rule has the highest specificity ({specificity}) among {stats['matches_found']} matching rules (tie broken by lowest rule index {idx}).")
         
@@ -266,7 +266,7 @@ class RulesEngine:
                     "outputs": outputs,
                     "specificity": specificity,
                     "rule_index": idx,
-                    "conditions": [list(c) if isinstance(c, set) else c for c in conditions],
+                    "conditions": [list(c) if isinstance(c, frozenset) else c for c in conditions],
                     "path": path
                 }
                 for outputs, specificity, idx, conditions, path in sorted(partial_matches, key=lambda x: (-x[1], x[2]))
