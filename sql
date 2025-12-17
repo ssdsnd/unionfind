@@ -450,3 +450,53 @@ SELECT ro.value AS class_teacher
 FROM RULE_OUTPUT ro
 JOIN active_rules ar ON ro.rule_version_id = ar.rule_version_id
 WHERE ro.driver_id = 4;  -- CLASS_TEACHER
+
+
+
+-- ===========================
+-- SELECT ACTIVE RULES WITH INPUT TYPE AND CLEAN TABLE FORMAT
+-- ===========================
+
+WITH latest_active_ruleset AS (
+    SELECT ruleset_version_id
+    FROM RULESET_VERSION
+    WHERE status = 'ACTIVE'
+    ORDER BY valid_from DESC
+    LIMIT 1
+),
+active_rules AS (
+    SELECT rr.rule_version_id, rv.version_no, r.description AS rule_desc
+    FROM RULESET_RULE rr
+    JOIN latest_active_ruleset lr ON rr.ruleset_version_id = lr.ruleset_version_id
+    JOIN RULE_VERSION rv ON rr.rule_version_id = rv.rule_version_id
+    JOIN RULE r ON rv.rule_id = r.rule_id
+    WHERE rv.status = 'ACTIVE'
+),
+rule_inputs AS (
+    SELECT ri.rule_version_id, d.name AS driver_name, 
+           ri.value_type, riv.value, riv.group_id
+    FROM RULE_INPUT ri
+    JOIN RULE_INPUT_VALUE riv ON ri.rule_input_id = riv.rule_input_id
+    JOIN DRIVER d ON ri.driver_id = d.driver_id
+),
+rule_outputs AS (
+    SELECT ro.rule_version_id, d.name AS driver_name, ro.value
+    FROM RULE_OUTPUT ro
+    JOIN DRIVER d ON ro.driver_id = d.driver_id
+)
+SELECT 
+    ar.rule_version_id,
+    ar.version_no,
+    ar.rule_desc,
+    -- Group inputs per driver with type
+    GROUP_CONCAT(ri.driver_name || ' (' || ri.value_type || '): ' || ri.value, ', ') AS inputs,
+    GROUP_CONCAT(ro.driver_name || ': ' || ro.value, ', ') AS outputs
+FROM active_rules ar
+LEFT JOIN rule_inputs ri ON ar.rule_version_id = ri.rule_version_id
+LEFT JOIN rule_outputs ro ON ar.rule_version_id = ro.rule_version_id
+GROUP BY ar.rule_version_id, ar.version_no, ar.rule_desc
+ORDER BY ar.rule_version_id;
+
+
+
+
