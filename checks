@@ -1,0 +1,389 @@
+#include <string>
+#include <vector>
+#include <memory>
+#include <type_traits>
+
+// ======================================================
+// Result
+// ======================================================
+
+enum class Result {
+    PASS,
+    FAIL
+};
+
+// ======================================================
+// Legacy base classes (UNCHANGED)
+// ======================================================
+
+class SubCheck;
+
+class Check {
+public:
+    explicit Check(std::string name)
+        : name_(std::move(name)) {}
+
+    virtual ~Check() = default;
+
+    virtual Result do_check() {
+        for (const auto& sc : subchecks_) {
+            if (sc->do_subcheck() == Result::FAIL)
+                return Result::FAIL;
+        }
+        return Result::PASS;
+    }
+
+protected:
+    void add_raw(std::unique_ptr<SubCheck> sc) {
+        subchecks_.push_back(std::move(sc));
+    }
+
+private:
+    std::string name_;
+    std::vector<std::unique_ptr<SubCheck>> subchecks_;
+};
+
+// ------------------------------------------------------
+
+class SubCheck {
+public:
+    explicit SubCheck(Check& parent)
+        : parent_(parent) {}
+
+    virtual ~SubCheck() = default;
+    virtual Result do_subcheck() = 0;
+
+protected:
+    Check& parent_;
+};
+
+// ======================================================
+// Library: Context-based infrastructure
+// ======================================================
+
+template<typename ContextT>
+class ContextBasedCheck : public Check {
+public:
+    explicit ContextBasedCheck(std::string name)
+        : Check(std::move(name)) {}
+
+    ContextT& context() { return context_; }
+    const ContextT& context() const { return context_; }
+
+    // 🔒 Typed add — ONLY accepts compatible subchecks
+    template<typename SubCheckT>
+    void add(std::unique_ptr<SubCheckT> sc) {
+        static_assert(
+            std::is_base_of_v<ContextSubCheck<ContextBasedCheck<ContextT>, ContextT>, SubCheckT>,
+            "SubCheck type does not match this ContextBasedCheck"
+        );
+
+        add_raw(std::move(sc));
+    }
+
+private:
+    ContextT context_{};
+
+    // Forward declaration for static_assert
+    template<typename CheckT, typename CtxT>
+    friend class ContextSubCheck;
+};
+
+// ------------------------------------------------------
+
+template<typename CheckT, typename ContextT>
+class ContextSubCheck : public SubCheck {
+public:
+    explicit ContextSubCheck(CheckT& parent)
+        : SubCheck(parent), check_(parent) {}
+
+protected:
+    CheckT& check() { return check_; }
+    ContextT& context() { return check_.context(); }
+
+private:
+    CheckT& check_;
+};
+
+// ======================================================
+// Example: FooCheck
+// ======================================================
+
+struct FooContext {
+    int counter = 0;
+    bool ready = false;
+};
+
+class FooCheck : public ContextBasedCheck<FooContext> {
+public:
+    using ContextBasedCheck::ContextBasedCheck;
+};
+
+// ------------------------------------------------------
+
+class FooA : public ContextSubCheck<FooCheck, FooContext> {
+public:
+    using ContextSubCheck::ContextSubCheck;
+
+    Result do_subcheck() override {
+        context().counter++;
+        context().ready = true;
+        return Result::PASS;
+    }
+};
+
+class FooB : public ContextSubCheck<FooCheck, FooContext> {
+public:
+    using ContextSubCheck::ContextSubCheck;
+
+    Result do_subcheck() override {
+        return context().ready ? Result::PASS : Result::FAIL;
+    }
+};
+
+// ======================================================
+// Example: BarCheck
+// ======================================================
+
+struct BarContext {
+    std::string state;
+};
+
+class BarCheck : public ContextBasedCheck<BarContext> {
+public:
+    using ContextBasedCheck::ContextBasedCheck;
+};
+
+class BarX : public ContextSubCheck<BarCheck, BarContext> {
+public:
+    using ContextSubCheck::ContextSubCheck;
+
+    Result do_subcheck() override {
+        context().state = "OK";
+        return Result::PASS;
+    }
+};
+
+// ======================================================
+// Usage
+// ======================================================
+
+int main() {
+    FooCheck foo("Foo01");
+    foo.add(std::make_unique<FooA>(foo)); // ✅ OK
+    foo.add(std::make_unique<FooB>(foo)); // ✅ OK
+
+    // foo.add(std::make_unique<BarX>(foo)); // ❌ COMPILE-TIME ERROR
+
+    foo.do_check();
+
+    BarCheck bar("Bar01");
+    bar.add(std::make_unique<BarX>(bar)); // ✅ OK
+}
+
+
+#pragma once
+#include <string>
+#include <vector>
+#include <map>
+#include <set>
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+
+//
+// 1️⃣ Generic IInputView
+//
+template<typename KeyType, typename ValueType>
+class IInputView {
+public:
+    virtual ~IInputView() = default;
+    virtual bool has(const KeyType& key) const = 0;
+    virtual ValueType get(const KeyType& key) const = 0;
+};
+
+//
+// 2️⃣ Templated MatchedResult
+//
+template<typename RowType>
+struct MatchedResult {
+    std::vector<RowType> rows;
+    bool empty() const { return rows.empty(); }
+    void add_row(RowType&& row) { rows.push_back(std::move(row)); }
+};
+
+//
+// 3️⃣ Generic IRulesEngine interface
+//
+template<typename RowType, typename KeyType, typename ValueType>
+class IRulesEngine {
+public:
+    virtual ~IRulesEngine() = default;
+    virtual MatchedResult<RowType> eval(const IInputView<KeyType, ValueType>& input) const = 0;
+};
+
+//
+// 4️⃣ Legacy engine (cannot modify)
+//
+class LegacyRow {
+public:
+    std::map<std::string,std::string> fields;
+    std::set<std::string> checks;
+};
+
+class LegacyRulesEngine {
+public:
+    LegacyRulesEngine() = default;
+
+    // Legacy eval method (input as map<string,string>)
+    std::vector<LegacyRow> eval(const std::map<std::string,std::string>& input) const {
+        std::vector<LegacyRow> result;
+
+        LegacyRow row;
+        if(input.count("Client")) row.fields["Client"] = input.at("Client");
+        if(input.count("AssetClass")) row.fields["AssetClass"] = input.at("AssetClass");
+        if(input.count("GMV")) row.fields["GMV"] = input.at("GMV");
+        if(input.count("SOV")) row.fields["SOV"] = input.at("SOV");
+        row.checks = {"CFTC","SEC"};
+
+        result.push_back(std::move(row));
+        return result;
+    }
+};
+
+//
+// 5️⃣ Adapter for Legacy engine -> templated interface
+//
+template<typename RowType, typename KeyType, typename ValueType>
+class LegacyEngineAdapter : public IRulesEngine<RowType, KeyType, ValueType> {
+public:
+    explicit LegacyEngineAdapter(const LegacyRulesEngine& legacy) : legacy_(legacy) {}
+
+    MatchedResult<RowType> eval(const IInputView<KeyType, ValueType>& input) const override {
+        // Convert IInputView<KeyType,ValueType> to legacy map<string,string>
+        std::map<std::string,std::string> legacy_input;
+        for (const auto& key : keys_) {
+            if(input.has(key)) {
+                legacy_input[key] = input.get(key);
+            }
+        }
+
+        // Call legacy engine
+        auto legacy_rows = legacy_.eval(legacy_input);
+
+        // Convert legacy rows to templated RowType
+        MatchedResult<RowType> result;
+        for(const auto& lr : legacy_rows) {
+            RowType row = convert_row(lr);
+            result.add_row(std::move(row));
+        }
+        return result;
+    }
+
+private:
+    const LegacyRulesEngine& legacy_;
+
+    // For this example: static keys known
+    const std::vector<std::string> keys_{"Client","AssetClass","GMV","SOV"};
+
+    // Convert a LegacyRow to RowType
+    RowType convert_row(const LegacyRow& lr) const {
+        RowType row{};
+        if constexpr (std::is_same<RowType, FastRow>::value) {
+            row.client_id = std::hash<std::string>{}(lr.fields.at("Client")) % 1000;
+            row.asset_class_id = std::hash<std::string>{}(lr.fields.at("AssetClass")) % 100;
+            row.gmv = std::stod(lr.fields.at("GMV"));
+            row.sov = std::stod(lr.fields.at("SOV"));
+            row.check_mask = 0b11; // example mapping
+        } else if constexpr (std::is_same<RowType, LegacyRow>::value) {
+            row = lr; // identity
+        } else {
+            static_assert(sizeof(RowType)==0, "Unsupported RowType in LegacyEngineAdapter");
+        }
+        return row;
+    }
+};
+
+//
+// 6️⃣ Fast engine (enum keys, numeric values)
+//
+enum class FieldID { Client=0, AssetClass, GMV, SOV, COUNT };
+
+struct FastRow {
+    uint32_t client_id;
+    uint32_t asset_class_id;
+    double gmv;
+    double sov;
+    uint32_t check_mask;
+};
+
+class FastRulesEngine : public IRulesEngine<FastRow, FieldID, double> {
+public:
+    MatchedResult<FastRow> eval(const IInputView<FieldID,double>& input) const override {
+        MatchedResult<FastRow> result;
+        uint32_t client_id = static_cast<uint32_t>(input.has(FieldID::Client) ? input.get(FieldID::Client) : 0);
+        uint32_t asset_class_id = static_cast<uint32_t>(input.has(FieldID::AssetClass) ? input.get(FieldID::AssetClass) : 0);
+        double gmv = input.has(FieldID::GMV) ? input.get(FieldID::GMV) : 0.0;
+        double sov = input.has(FieldID::SOV) ? input.get(FieldID::SOV) : 0.0;
+        uint32_t check_mask = 0b11;
+
+        result.add_row({client_id, asset_class_id, gmv, sov, check_mask});
+        return result;
+    }
+};
+
+//
+// 7️⃣ Concrete IInputView implementations
+//
+
+// Legacy string map
+class MapInputView : public IInputView<std::string,std::string> {
+public:
+    explicit MapInputView(const std::map<std::string,std::string>& data) : data_(data) {}
+    bool has(const std::string& key) const override { return data_.find(key) != data_.end(); }
+    std::string get(const std::string& key) const override { return data_.at(key); }
+private:
+    const std::map<std::string,std::string>& data_;
+};
+
+// Fast numeric array
+class ArrayInputView : public IInputView<FieldID,double> {
+public:
+    explicit ArrayInputView(const double values[static_cast<int>(FieldID::COUNT)]) {
+        for(int i=0;i<static_cast<int>(FieldID::COUNT);++i) values_[i]=values[i];
+    }
+    bool has(const FieldID& key) const override { return static_cast<int>(key) < static_cast<int>(FieldID::COUNT); }
+    double get(const FieldID& key) const override { return values_[static_cast<int>(key)]; }
+private:
+    double values_[static_cast<int>(FieldID::COUNT)];
+};
+
+//
+// 8️⃣ Example usage
+//
+inline void example_usage() {
+    std::cout << "=== Legacy Adapter Engine ===\n";
+    std::map<std::string,std::string> legacy_input{
+        {"Client","CLIENT001"},
+        {"AssetClass","CREDIT"},
+        {"GMV","1000"},
+        {"SOV","10"}
+    };
+    MapInputView legacy_view(legacy_input);
+
+    LegacyRulesEngine legacy_engine;
+    LegacyEngineAdapter<FastRow,std::string,std::string> adapter(legacy_engine);
+    auto legacy_result = adapter.eval(legacy_view);
+    for(const auto& row : legacy_result.rows) {
+        std::cout << "ClientID=" << row.client_id << " GMV=" << row.gmv << "\n";
+    }
+
+    std::cout << "\n=== Fast Engine ===\n";
+    double fast_values[static_cast<int>(FieldID::COUNT)] = {1, 2, 1000.0, 10.0, 0};
+    ArrayInputView fast_view(fast_values);
+    FastRulesEngine fast_engine;
+    auto fast_result = fast_engine.eval(fast_view);
+    for(const auto& row : fast_result.rows) {
+        std::cout << "ClientID=" << row.client_id << " GMV=" << row.gmv << "\n";
+    }
+}
