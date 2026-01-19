@@ -1,0 +1,77 @@
+{
+  "type": "full_snapshot",
+  "version": 1,
+  "name": "ABC",
+  "size": 2,
+  "lasttime": "2026-01-19T00:00:00Z",
+  "snapshot_data": "https://19012026-a.json",
+  "inline_data": {
+    "defs": {
+      "drivers": [
+        { "type": "inputdriver", "id": "indriv-001", "name": "Client", "weight": 4 },
+        { "type": "inputdriver", "id": "indriv-002", "name": "Region", "weight": 2 },
+        { "type": "outputdriver", "id": "indriv-003", "name": "GMV" }
+      ],
+      "valuegroups": [
+        {
+          "id": "vg-region-core",
+          "name": "Core Regions",
+          "datatype": "STRING",
+          "values": ["APAC", "EMEA"]
+        },
+        {
+          "id": "vg-region-extended",
+          "name": "Extended Regions",
+          "datatype": "STRING",
+          "values": ["APAC", "EMEA", "NA", "LATAM"]
+        }
+      ]
+    },
+    "rules": [
+      {
+        "name": "r01",
+        "inputdrivers": [
+          {
+            "driverid": "indriv-001",
+            "value": "001",
+            "datatype": "STRING"
+          },
+          {
+            "driverid": "indriv-002",
+            "datatype": "valuegroup",
+            "valuegroupid": "vg-region-core"
+          }
+        ],
+        "outputdrivers": [
+          {
+            "driverid": "indriv-003",
+            "value": "100000",
+            "datatype": "STRING"
+          }
+        ]
+      },
+      {
+        "name": "r02",
+        "inputdrivers": [
+          {
+            "driverid": "indriv-001",
+            "value": "002",
+            "datatype": "STRING"
+          },
+          {
+            "driverid": "indriv-002",
+            "datatype": "valuegroup",
+            "valuegroupid": "vg-region-extended"
+          }
+        ],
+        "outputdrivers": [
+          {
+            "driverid": "indriv-003",
+            "value": "100000",
+            "datatype": "STRING"
+          }
+        ]
+      }
+    ]
+  }
+}
