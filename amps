@@ -1,0 +1,90 @@
+<SOW>
+  <!-- Source topics -->
+  <Topic>
+    <Name>ruleset</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid</Key>
+  </Topic>
+
+  <Topic>
+    <Name>rules</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid,/ruleid</Key>
+  </Topic>
+
+  <Topic>
+    <Name>drivers</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid,/driverid</Key>
+  </Topic>
+
+  <!-- View to normalize drivers -->
+  <View>
+    <Name>drivers_json</Name>
+    <UnderlyingTopic>
+      <Topic>/drivers</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>/driverid</Field>
+      <Field>/name</Field>
+      <Field>/weight</Field>
+      <Field>/type</Field>
+    </Projection>
+    <Key>/rulesetid,/driverid</Key>
+  </View>
+
+  <!-- View to normalize rules -->
+  <View>
+    <Name>rules_json</Name>
+    <UnderlyingTopic>
+      <Topic>/rules</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>/ruleid</Field>
+      <!-- Keep driver-id-* dynamic fields as-is -->
+      <Field>/driver-id-1</Field>
+      <Field>/driver-id-2</Field>
+      <Field>/driver-id-3</Field>
+      <!-- For N drivers, add /driver-id-N or handle client-side -->
+    </Projection>
+    <Key>/rulesetid,/ruleid</Key>
+  </View>
+
+  <!-- Aggregated view: ruleset + rules + drivers -->
+  <View>
+    <Name>ruleset_aggregated_view</Name>
+    <UnderlyingTopic>
+      <Topic>/ruleset</Topic>
+      <Topic>/rules_json</Topic>
+      <Topic>/drivers_json</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+
+    <!-- Join ruleset → rules -->
+    <Join>ruleset./rulesetid = rules_json./rulesetid</Join>
+    <!-- Join rules → drivers -->
+    <Join>rules_json./rulesetid = drivers_json./rulesetid</Join>
+
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>[rules_json]./ruleid AS /ruleid</Field>
+      <Field>[drivers_json]./driverid AS /driverid</Field>
+      <Field>[drivers_json]./name AS /driverName</Field>
+      <Field>[drivers_json]./weight AS /driverWeight</Field>
+      <Field>[drivers_json]./type AS /driverType</Field>
+
+      <!-- Rule values per driver -->
+      <Field>[rules_json]./driver-id-1 AS /driverValue1</Field>
+      <Field>[rules_json]./driver-id-2 AS /driverValue2</Field>
+      <Field>[rules_json]./driver-id-3 AS /driverValue3</Field>
+      <!-- If there are more driver-ids, they can be added or processed client-side -->
+    </Projection>
+
+    <!-- Key per row: one row per ruleset × rule × driver -->
+    <Key>/rulesetid,/ruleid,/driverid</Key>
+  </View>
+</SOW>
