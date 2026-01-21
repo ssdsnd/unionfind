@@ -1,0 +1,105 @@
+<SOW>
+  <!-- Source topics -->
+  <Topic>
+    <Name>ruleset</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid</Key>
+  </Topic>
+
+  <Topic>
+    <Name>rules</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid,/ruleid</Key>
+  </Topic>
+
+  <Topic>
+    <Name>drivers</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid,/driverid</Key>
+  </Topic>
+
+  <Topic>
+    <Name>rule_driver_values</Name>
+    <MessageType>json</MessageType>
+    <Key>/rulesetid,/ruleid,/driverid</Key>
+  </Topic>
+
+  <!-- Normalize rules topic -->
+  <View>
+    <Name>rules_json</Name>
+    <UnderlyingTopic>
+      <Topic>/rules</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>/ruleid</Field>
+      <!-- Add more fields if rules have them -->
+    </Projection>
+    <Key>/rulesetid,/ruleid</Key>
+  </View>
+
+  <!-- Normalize drivers topic -->
+  <View>
+    <Name>drivers_json</Name>
+    <UnderlyingTopic>
+      <Topic>/drivers</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>/driverid</Field>
+      <Field>/name</Field>
+      <Field>/weight</Field>
+      <Field>/type</Field>
+    </Projection>
+    <Key>/rulesetid,/driverid</Key>
+  </View>
+
+  <!-- Normalize rule_driver_values topic -->
+  <View>
+    <Name>rule_driver_values_json</Name>
+    <UnderlyingTopic>
+      <Topic>/rule_driver_values</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>/ruleid</Field>
+      <Field>/driverid</Field>
+      <Field>/value</Field>
+    </Projection>
+    <Key>/rulesetid,/ruleid,/driverid</Key>
+  </View>
+
+  <!-- Aggregated view: join ruleset, rules, drivers, and values -->
+  <View>
+    <Name>ruleset_aggregated_view</Name>
+    <UnderlyingTopic>
+      <Topic>/ruleset</Topic>
+      <Topic>/rules_json</Topic>
+      <Topic>/drivers_json</Topic>
+      <Topic>/rule_driver_values_json</Topic>
+    </UnderlyingTopic>
+    <MessageType>json</MessageType>
+
+    <!-- Joins -->
+    <Join>ruleset./rulesetid = rules_json./rulesetid</Join>
+    <Join>rules_json./rulesetid = drivers_json./rulesetid</Join>
+    <Join>rules_json./ruleid = rule_driver_values_json./ruleid</Join>
+    <Join>drivers_json./driverid = rule_driver_values_json./driverid</Join>
+
+    <!-- Projection -->
+    <Projection>
+      <Field>/rulesetid</Field>
+      <Field>[rules_json]./ruleid AS /ruleid</Field>
+      <Field>[drivers_json]./driverid AS /driverid</Field>
+      <Field>[drivers_json]./name AS /driverName</Field>
+      <Field>[drivers_json]./weight AS /driverWeight</Field>
+      <Field>[drivers_json]./type AS /driverType</Field>
+      <Field>[rule_driver_values_json]./value AS /value</Field>
+    </Projection>
+
+    <Key>/rulesetid,/ruleid,/driverid</Key>
+  </View>
+</SOW>
